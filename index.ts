@@ -11,9 +11,9 @@ import readline from "readline/promises";
 
 dotenv.config(); // load environment variables from .env
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY
-if (!OPENAI_API_KEY) {
-  throw new Error("OPENAI_API_KEY is not set")
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
+if (!ANTHROPIC_API_KEY) {
+  throw new Error("ANTHROPIC_API_KEY is not set")
 }
 
 class MCPClient {
@@ -25,7 +25,7 @@ class MCPClient {
   constructor() {
     // Initialize Anthropic client and MCP client
     this.llm = new Anthropic({
-      apiKey: OPENAI_API_KEY,
+      apiKey: ANTHROPIC_API_KEY,
     });
     this.mcp = new Client({ name: "mcp-client-cli", version: "1.0.0" });
   }

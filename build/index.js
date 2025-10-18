@@ -11,9 +11,9 @@ const stdio_js_1 = require("@modelcontextprotocol/sdk/client/stdio.js");
 const dotenv_1 = __importDefault(require("dotenv"));
 const promises_1 = __importDefault(require("readline/promises"));
 dotenv_1.default.config(); // load environment variables from .env
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-if (!OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is not set");
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+if (!ANTHROPIC_API_KEY) {
+    throw new Error("ANTHROPIC_API_KEY is not set");
 }
 class MCPClient {
     mcp;
@@ -23,7 +23,7 @@ class MCPClient {
     constructor() {
         // Initialize Anthropic client and MCP client
         this.llm = new sdk_1.Anthropic({
-            apiKey: OPENAI_API_KEY,
+            apiKey: ANTHROPIC_API_KEY,
         });
         this.mcp = new index_js_1.Client({ name: "mcp-client-cli", version: "1.0.0" });
     }
