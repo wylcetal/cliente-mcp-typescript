@@ -3,17 +3,19 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-// anthropic sdk
+// Anthropic SDK
 const sdk_1 = require("@anthropic-ai/sdk");
-// mcp sdk
+// MCP Client
 const index_js_1 = require("@modelcontextprotocol/sdk/client/index.js");
 const stdio_js_1 = require("@modelcontextprotocol/sdk/client/stdio.js");
+// Express
+const express_1 = __importDefault(require("express"));
+const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
-const promises_1 = __importDefault(require("readline/promises"));
-dotenv_1.default.config(); // load environment variables from .env
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-if (!OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is not set");
+dotenv_1.default.config();
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+if (!ANTHROPIC_API_KEY) {
+    throw new Error("ANTHROPIC_API_KEY is not set");
 }
 class MCPClient {
     mcp;
@@ -21,16 +23,13 @@ class MCPClient {
     transport = null;
     tools = [];
     constructor() {
-        // Initialize Anthropic client and MCP client
         this.llm = new sdk_1.Anthropic({
-            apiKey: OPENAI_API_KEY,
+            apiKey: ANTHROPIC_API_KEY,
         });
         this.mcp = new index_js_1.Client({ name: "mcp-client-cli", version: "1.0.0" });
     }
-    // Conect to the MCP
     async connectToServer(serverScriptPath) {
         try {
-            // Determine script type and appropriate command
             const isJs = serverScriptPath.endsWith(".js");
             const isPy = serverScriptPath.endsWith(".py");
             if (!isJs && !isPy) {
@@ -41,13 +40,11 @@ class MCPClient {
                     ? "python"
                     : "python3"
                 : process.execPath;
-            // Initialize transport and connect to server
             this.transport = new stdio_js_1.StdioClientTransport({
-                command, // python /path/to/server.py
+                command,
                 args: [serverScriptPath],
             });
             await this.mcp.connect(this.transport);
-            // List available tools
             const toolsResult = await this.mcp.listTools();
             this.tools = toolsResult.tools.map((tool) => {
                 return {
@@ -63,7 +60,6 @@ class MCPClient {
             throw e;
         }
     }
-    // Process query
     async processQuery(query) {
         const messages = [
             {
@@ -71,36 +67,33 @@ class MCPClient {
                 content: query,
             },
         ];
-        // Initial Claude API call
         const response = await this.llm.messages.create({
-            model: "claude-sonnet-4-5",
+            model: "claude-3-5-sonnet-20241022",
             max_tokens: 1000,
             messages,
             tools: this.tools,
         });
-        // Process response and handle tool calls
         const finalText = [];
+        const toolResults = [];
         for (const content of response.content) {
             if (content.type === "text") {
                 finalText.push(content.text);
             }
             else if (content.type === "tool_use") {
-                // Execute tool call
                 const toolName = content.name;
                 const toolArgs = content.input;
                 const result = await this.mcp.callTool({
                     name: toolName,
                     arguments: toolArgs,
                 });
+                toolResults.push(result);
                 finalText.push(`[Calling tool ${toolName} with args ${JSON.stringify(toolArgs)}]`);
-                // Continue conversation with tool results
                 messages.push({
                     role: "user",
                     content: result.content,
                 });
-                // Get next response from Claude
                 const response = await this.llm.messages.create({
-                    model: "claude-sonnet-4-5",
+                    model: "claude-3-5-sonnet-20241022",
                     max_tokens: 1000,
                     messages,
                 });
@@ -109,46 +102,60 @@ class MCPClient {
         }
         return finalText.join("\n");
     }
-    // Run an interactive chat loop
-    async chatLoop() {
-        const rl = promises_1.default.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-        });
-        try {
-            console.log("\nMCP Client Started!");
-            console.log("Type your queries or 'quit' to exit.");
-            while (true) {
-                const message = await rl.question("\nQuery: ");
-                if (message.toLowerCase() === "quit") {
-                    break;
-                }
-                const response = await this.processQuery(message);
-                console.log("\n" + response);
-            }
-        }
-        finally {
-            rl.close();
-        }
-    }
-    // Clean up resources
     async cleanup() {
         await this.mcp.close();
     }
 }
 async function main() {
     if (process.argv.length < 3) {
-        console.log("Usage: node build/index.js <path_to_server_script>");
+        console.log("Usage: node index.ts <path_to_server_script>");
         return;
     }
+    const app = (0, express_1.default)();
+    const port = process.env.PORT || 3000;
+    // Middleware
+    app.use((0, cors_1.default)());
+    app.use(express_1.default.json());
     const mcpClient = new MCPClient();
     try {
         await mcpClient.connectToServer(process.argv[2]);
-        await mcpClient.chatLoop();
+        // Health check endpoint
+        const healthCheck = (req, res) => {
+            res.json({ status: 'ok', tools: mcpClient.tools.map(t => t.name) });
+        };
+        app.get('/health', healthCheck);
+        // LLM interaction endpoint
+        const chatHandler = async (req, res) => {
+            try {
+                const { query } = req.body;
+                if (!query) {
+                    res.status(400).json({ error: 'Query is required' });
+                    return;
+                }
+                const response = await mcpClient.processQuery(query);
+                res.json({ response });
+            }
+            catch (error) {
+                console.error('Error processing query:', error);
+                res.status(500).json({ error: 'Failed to process query' });
+            }
+        };
+        app.post('/chat', chatHandler);
+        app.listen(port, () => {
+            console.log(`Server running on port ${port}`);
+            console.log(`Health check: http://localhost:${port}/health`);
+            console.log(`Chat endpoint: http://localhost:${port}/chat`);
+        });
+        // Handle graceful shutdown
+        process.on('SIGTERM', async () => {
+            console.log('SIGTERM received. Shutting down gracefully...');
+            await mcpClient.cleanup();
+            process.exit(0);
+        });
     }
-    finally {
-        await mcpClient.cleanup();
-        process.exit(0);
+    catch (error) {
+        console.error('Failed to start server:', error);
+        process.exit(1);
     }
 }
 main();
